@@ -8,10 +8,11 @@ import com.dotcms.saml.IdentityProviderConfigurationFactory;
 import com.dotcms.util.CollectionsUtils;
 import com.dotcms.util.security.EncryptorFactory;
 import com.dotmarketing.business.APILocator;
+import com.dotmarketing.portlets.contentlet.business.HostAPI;
 import com.dotmarketing.util.Config;
 import com.dotmarketing.util.Logger;
+import com.dotmarketing.util.UUIDUtil;
 import com.dotmarketing.util.WebKeys;
-import com.hazelcast.util.Base64;
 import com.liferay.portal.model.User;
 
 import javax.servlet.ServletException;
@@ -19,14 +20,19 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import javax.ws.rs.Consumes;
+import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+import javax.ws.rs.core.UriBuilder;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -44,19 +50,30 @@ public class SamlBenchmarkResource {
 	private final IdentityProviderConfigurationFactory identityProviderConfigurationFactory;
 
 	private final String successPath = Config.getStringProperty("SAML_BENCHMARK_SUCCESS_PATH", "/benchmark/form");
-	private final String benchmarkUserId = Config.getStringProperty("SAML_BENCHMARK_USER_ID", "benchmark@prosperity.com");
+	private final String benchmarkUserId = Config.getStringProperty("SAML_BENCHMARK_USER_ID", "dotcms.org.1");
 
 	public SamlBenchmarkResource() {
 
 		this.identityProviderConfigurationFactory = DotSamlProxyFactory.getInstance().identityProviderConfigurationFactory();
 	}
 
+	@GET // http://localhost:8080/api/v1/dotsaml/benchmark/test
+	@Path("/benchmark/test")
+	@Consumes({MediaType.APPLICATION_XML, MediaType.APPLICATION_FORM_URLENCODED})
+	@Produces( { MediaType.APPLICATION_XML, "text/html" } )
+	@NoCache
+	public Response processAssertionTest(
+								 @Context final HttpServletRequest httpServletRequest,
+								 @Context final HttpServletResponse httpServletResponse) throws IOException, ServletException {
+
+		return processAssertion(APILocator.systemHost().getIdentifier(), httpServletRequest, httpServletResponse);
+	}
 	@POST
 	@Path("/benchmark/{idpConfigId}")
 	@Consumes({MediaType.APPLICATION_XML, MediaType.APPLICATION_FORM_URLENCODED})
 	@Produces( { MediaType.APPLICATION_XML, "text/html" } )
 	@NoCache
-	public void processLogin(@PathParam( "idpConfigId" ) final String idpConfigId,
+	public Response processAssertion(@PathParam( "idpConfigId" ) final String idpConfigId,
 							 @Context final HttpServletRequest httpServletRequest,
 							 @Context final HttpServletResponse httpServletResponse) throws IOException, ServletException {
 
@@ -91,9 +108,9 @@ public class SamlBenchmarkResource {
 					Logger.debug(this, ()-> "LoginPath: " + successPath);
 
 					// forward to the success path
-					httpServletRequest.setAttribute("samlAttributes", decodedAttributesMap);
-					httpServletRequest.getRequestDispatcher(successPath).forward(httpServletRequest, httpServletResponse);
-					return;
+					httpServletRequest.getSession().setAttribute("samlAttributes", decodedAttributesMap);
+					final URI uri = UriBuilder.fromUri(successPath).build();
+					return Response.seeOther( uri ).build();
 				}
 			} finally {
 				if (null != identityProviderConfiguration) {
@@ -125,7 +142,7 @@ public class SamlBenchmarkResource {
 	private Map<String, String> decode(Map<String, String> encodedAttributesMap) {
 
 		final String contracts    = encodedAttributesMap.get("contracts");
-		final byte[] decodedBytes = Base64.decode(contracts.getBytes(StandardCharsets.UTF_8));
+		final byte[] decodedBytes = Base64.getDecoder().decode(contracts);
 		final Map<String, String> decodedMap = new HashMap<>(encodedAttributesMap);
 		decodedMap.put("contracts", new String(decodedBytes, StandardCharsets.UTF_8));
 		return decodedMap;
